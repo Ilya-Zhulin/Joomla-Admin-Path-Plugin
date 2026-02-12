@@ -1,146 +1,240 @@
 <?php
 /*
  * @package    plg_system_adminpath
- * @version    __DEPLOY_VERSION__
+ * @version    1.0.0
  * @author     Ilya A.Zhulin <ilya.zhulin@hotmail.com>
  * @copyright  ©Ilya A.Zhulin, 2026
  * @license    GNU General Public License version 2 or later;
  *
- * The last change: 10.02.2026, 23:52
+ * The last change: 12.02.2026, 16:06
  */
 
 namespace Joomla\Plugin\System\AdminPath\Extension;
 
-use Joomla\CMS\Application\CMSApplication;
 use Joomla\CMS\Factory;
+use Joomla\CMS\Language\Text;
 use Joomla\CMS\Plugin\CMSPlugin;
-use Joomla\CMS\Session\Session;
+use Joomla\CMS\Response\JsonResponse;
 use Joomla\CMS\Uri\Uri;
-use Joomla\Event\DispatcherInterface;
+use Joomla\Event\EventInterface;
+use Joomla\Event\SubscriberInterface;
 
 defined('_JEXEC') or die;
 
-/**
- * AdminPath plugin to protect administrator access
- *
- * @since  1.0.0
- */
-class AdminPath extends CMSPlugin
+class AdminPath extends CMSPlugin implements SubscriberInterface
 {
 	/**
-	 * Application object
+	 * Load the language file on instantiation
 	 *
-	 * @var    CMSApplication
+	 * @var    boolean
 	 * @since  1.0.0
 	 */
-	protected $app;
+	protected $autoloadLanguage = true;
 
 	/**
-	 * Session object
+	 * Returns an array of events this subscriber will listen to.
 	 *
-	 * @var    Session
-	 * @since  1.0.0
-	 */
-	protected $session;
-
-	/**
-	 * Secret path for admin access
-	 *
-	 * @var    string
-	 * @since  1.0.0
-	 */
-	protected $secretPath = 'admin-bolashaq-2026';
-
-	/**
-	 * Block direct access flag
-	 *
-	 * @var    bool
-	 * @since  1.0.0
-	 */
-	protected $blockDirect = true;
-
-	/**
-	 * Constructor
-	 *
-	 * @param   DispatcherInterface  $subject  The object to observe
-	 * @param   array                $config   An optional associative array of configuration settings
+	 * @return  array
 	 *
 	 * @since   1.0.0
 	 */
-	public function __construct(&$subject, $config = [])
+	public static function getSubscribedEvents(): array
 	{
-		parent::__construct($subject, $config);
-
-		$this->secretPath  = $this->params->get('secret_path', 'admin-bolashaq-2026');
-		$this->blockDirect = (bool) $this->params->get('block_direct', 1);
-		$this->session     = Factory::getSession();
+		return [
+			'onAfterInitialise'    => 'onAfterInitialise',
+			'onContentPrepareForm' => 'onContentPrepareForm',
+			'onAjaxAdminpath'      => 'onAjaxAdminpath',
+			'onBeforeCompileHead'  => 'onBeforeCompileHead',
+		];
 	}
 
 	/**
-	 * After initialise event - check admin access
+	 * AJAX handler for session status check
+	 *
+	 * @param   EventInterface  $event  The event object
 	 *
 	 * @return  void
 	 *
 	 * @since   1.0.0
 	 */
-	public function onAfterInitialise()
+	public function onAjaxAdminpath()
 	{
-		// Only in administrator
-		if (!$this->app->isClient('administrator'))
+		$app = Factory::getApplication();
+
+		if (!$app->isClient('administrator'))
+		{
+			echo new JsonResponse('', 'Client is not administrator', true);
+			$app->close();
+		}
+
+		$session = $app->getSession();
+		$allowed = $session->get('adminpath_allowed', 0);
+
+		echo new JsonResponse((bool) $allowed, '', false);
+
+		$app->close();
+	}
+
+	/**
+	 * Before compile head event - load language strings for JavaScript
+	 *
+	 * @param   EventInterface  $event  The event object
+	 *
+	 * @return  void
+	 *
+	 * @since   1.0.0
+	 */
+	public function onBeforeCompileHead(EventInterface $event = null)
+	{
+		$app = Factory::getApplication();
+
+		if (!$app->isClient('administrator'))
 		{
 			return;
 		}
 
-		// If blocking direct access
-		if ($this->blockDirect)
+		$input = $app->getInput();
+
+		// Загружаем языковые строки только на странице настроек плагина
+		if ($input->get('option') === 'com_plugins' &&
+			$input->get('view') === 'plugin')
 		{
-			$allowed = $this->session->get('adminpath_allowed', false);
-
-			if (!$allowed)
+			// Получаем текущий плагин из базы
+			$pluginId = (int) $input->get('extension_id');
+			$db       = Factory::getContainer()->get('DatabaseDriver');
+			$query    = $db->getQuery(true)
+				->select($db->quoteName('element'))
+				->from($db->quoteName('#__extensions'))
+				->where($db->quoteName('extension_id') . ' = :id')
+				->bind(':id', $pluginId);
+			$db->setQuery($query);
+			$element = $db->loadResult();
+			// Если это наш плагин
+			if ($element === 'adminpath')
 			{
-				// Get 404 page URL
-				$uri  = Uri::getInstance();
-				$path = $uri->getPath();
-
-				// Check if we're already on 404 to prevent loop
-				if (strpos($path, '404') === false && strpos($path, 'error') === false)
-				{
-					$this->app->redirect(Uri::root() . '404');
-					$this->app->close();
-				}
+				Text::script('PLG_SYSTEM_ADMINPATH_YOUR_ADMIN_URL');
+				Text::script('PLG_SYSTEM_ADMINPATH_COPY_LINK');
+				Text::script('PLG_SYSTEM_ADMINPATH_OPEN_LINK');
+				Text::script('PLG_SYSTEM_ADMINPATH_COPIED');
+				Text::script('PLG_SYSTEM_ADMINPATH_WARNING_BLOCK');
 			}
 		}
 	}
 
 	/**
-	 * After route event - handle secret path access
+	 * After initialise event - handle admin access with secret parameter
+	 *
+	 * @param   EventInterface  $event  The event object
 	 *
 	 * @return  void
 	 *
 	 * @since   1.0.0
 	 */
-	public function onAfterRoute()
+	public function onAfterInitialise(EventInterface $event = null)
 	{
-		// Only in frontend
-		if (!$this->app->isClient('site'))
+		$app = Factory::getApplication();
+
+		// Работаем только в админке
+		if (!$app->isClient('administrator'))
+		{
+			return;
+		}
+		
+		$secretParam  = $this->params->get('secret_path', 'secretadmin');
+		$blockDirect  = (bool) $this->params->get('block_direct', 0);
+		$redirectType = $this->params->get('redirect_type', '404');
+		$customUrl    = $this->params->get('custom_redirect_url', '');
+
+		$input       = $app->getInput();
+		$session     = $app->getSession();
+		$uri         = Uri::getInstance();
+		$currentPath = $uri->getPath();
+
+		// Получаем все параметры запроса
+		$allParams = $input->getArray();
+
+		// Проверяем наличие секретного параметра
+		$hasSecretParam = isset($allParams[$secretParam]);
+
+		// Получаем флаг из сессии
+		$allowed = $session->get('adminpath_allowed', 0);
+
+		// Если есть секретный параметр - разрешаем доступ
+		if ($hasSecretParam)
+		{
+			$session->set('adminpath_allowed', 1);
+
+			// Удаляем секретный параметр из URL (чистый редирект)
+			$cleanUri = clone $uri;
+			$cleanUri->delVar($secretParam);
+
+			$app->redirect($cleanUri->toString());
+		}
+
+		// Если прямой доступ заблокирован
+		if ($blockDirect && !$allowed)
+		{
+			// Предотвращаем циклический редирект
+			if (strpos($currentPath, '404') === false &&
+				strpos($currentPath, 'error') === false)
+			{
+				$root = Uri::root();
+
+				switch ($redirectType)
+				{
+					case 'home':
+						$redirectUrl = $root;
+						break;
+					case 'custom':
+						$redirectUrl = $customUrl ?: $root;
+						break;
+					default:
+						$redirectUrl = $root . '404';
+						break;
+				}
+
+				$app->redirect($redirectUrl);
+			}
+		}
+	}
+
+	/**
+	 * Content prepare form event - load JavaScript for admin URL display
+	 *
+	 * @param   EventInterface  $event  The event object
+	 *
+	 * @return  void
+	 *
+	 * @since   1.0.0
+	 */
+	public function onContentPrepareForm(EventInterface $event)
+	{
+		$app = Factory::getApplication();
+
+		if (!$app->isClient('administrator'))
 		{
 			return;
 		}
 
-		$uri  = Uri::getInstance();
-		$path = trim($uri->getPath(), '/');
+		$form = $event->getArgument('0');
+		$data = $event->getArgument('1');
 
-		// Remove language prefix if exists
-		$path = preg_replace('#^(ru|kk)/#', '', $path);
-
-		// Check if secret path matches
-		if ($path === $this->secretPath)
+		// Загружаем скрипт только для формы нашего плагина
+		if ($form && $form->getName() === 'com_plugins.plugin')
 		{
-			// Set session flag
-			$this->session->set('adminpath_allowed', true);
-
-			// Redirect to administrator
-			$this->app->redirect(Uri::root() . 'administrator');
+			if (is_object($data) && isset($data->element) && $data->element === 'adminpath')
+			{
+				$wa = $app->getDocument()->getWebAssetManager();
+				$wa->registerAndUseScript(
+					'plg_system.adminpath.adminpath',
+					'plg_system_adminpath/adminpath.min.js',
+					[],
+					['defer' => true],
+					['core']
+				);
+			}
 		}
 	}
+
+
 }
