@@ -1,7 +1,7 @@
 <?php
 /*
  * @package    plg_system_adminpath
- * @version    __DEPLOY_VERSION__
+ * @version    1.0.0
  * @author     Ilya A.Zhulin <ilya.zhulin@hotmail.com>
  * @copyright  ©Ilya A.Zhulin, 2026
  * @license    GNU General Public License version 2 or later;
