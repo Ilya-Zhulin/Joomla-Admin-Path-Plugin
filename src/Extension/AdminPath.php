@@ -144,11 +144,24 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 		$blockDirect  = (bool) $this->params->get('block_direct', 0);
 		$redirectType = $this->params->get('redirect_type', '404');
 		$customUrl    = $this->params->get('custom_redirect_url', '');
+		$allowedIps   = (string) $this->params->get('allowed_ips', '');
+		$ipPrompt     = (bool) $this->params->get('ip_prompt', 0);
 
 		$input       = $app->getInput();
 		$session     = $app->getSession();
 		$uri         = Uri::getInstance();
 		$currentPath = $uri->getPath();
+
+		// IP клиента. REMOTE_ADDR надёжнее заголовков (их можно подделать).
+		// При работе за прокси/Cloudflare замените на доверенный заголовок.
+		$clientIp = (string) $input->server->get('REMOTE_ADDR', '');
+
+		// Разбор белого списка IP
+		$ipList = [];
+		if ($allowedIps !== '')
+		{
+			$ipList = array_values(array_filter(array_map('trim', preg_split('/[\r\n,;]+/', $allowedIps))));
+		}
 
 		// Получаем все параметры запроса
 		$allParams = $input->getArray();
@@ -159,10 +172,22 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 		// Получаем флаг из сессии
 		$allowed = $session->get('adminpath_allowed', 0);
 
+		// IP из белого списка - доступ как обычно, без секрета
+		$ipAllowed = $clientIp !== '' && in_array($clientIp, $ipList, true);
+
+		if ($ipAllowed)
+		{
+			$session->set('adminpath_allowed', 1);
+			$allowed = 1;
+		}
+
 		// Если есть секретный параметр - разрешаем доступ
 		if ($hasSecretParam)
 		{
 			$session->set('adminpath_allowed', 1);
+
+			// Отмечаем в куки, что пользователь уже входил (session cookie)
+			setcookie('adminpath_prompted', '1', 0, '/');
 
 			// Удаляем секретный параметр из URL (чистый редирект)
 			$cleanUri = clone $uri;
@@ -195,6 +220,42 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 
 				$app->redirect($redirectUrl);
 			}
+		}
+
+		// Напоминание о добавлении IP в белый список:
+		// показываем, если пользователь уже входил в этой сессии браузера,
+		// IP ещё не в белом списке и функция включена.
+		if ($ipPrompt && !$ipAllowed && isset($_COOKIE['adminpath_prompted']))
+		{
+			$pluginId = 0;
+
+			try
+			{
+				$db    = Factory::getContainer()->get('DatabaseDriver');
+				$query = $db->getQuery(true)
+					->select($db->quoteName('extension_id'))
+					->from($db->quoteName('#__extensions'))
+					->where($db->quoteName('type') . ' = ' . $db->quote('plugin'))
+					->where($db->quoteName('folder') . ' = ' . $db->quote('system'))
+					->where($db->quoteName('element') . ' = ' . $db->quote('adminpath'));
+				$db->setQuery($query);
+				$pluginId = (int) $db->loadResult();
+			}
+			catch (\Throwable $e)
+			{
+				$pluginId = 0;
+			}
+
+			$settingsUrl = 'index.php?option=com_plugins&view=plugin&layout=edit';
+
+			if ($pluginId > 0)
+			{
+				$settingsUrl .= '&extension_id=' . $pluginId . '&add_ip=' . urlencode($clientIp);
+			}
+
+			$message = Text::sprintf('PLG_SYSTEM_ADMINPATH_IP_PROMPT_MESSAGE', $clientIp, $settingsUrl);
+
+			$app->enqueueMessage($message, 'notice');
 		}
 	}
 
