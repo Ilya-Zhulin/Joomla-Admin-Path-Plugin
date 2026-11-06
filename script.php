@@ -61,7 +61,47 @@ class PlgSystemAdminPathInstallerScript
 	 *
 	 * @return  boolean  True on success
 	 */
-	public function postflight($route, InstallerAdapter $adapter) {}
+	public function postflight($route, InstallerAdapter $adapter)
+	{
+		if ($route !== 'install')
+		{
+			return;
+		}
+
+		$app      = Factory::getApplication();
+		$clientIp = (string) $app->getInput()->server->get('REMOTE_ADDR', '');
+
+		if ($clientIp === '')
+		{
+			return;
+		}
+
+		$app->getLanguage()->load('plg_system_adminpath', JPATH_ADMINISTRATOR);
+
+		$pluginId = 0;
+
+		try
+		{
+			$record   = \Joomla\CMS\Extension\ExtensionHelper::getExtensionRecord('adminpath', 'plugin', null, 'system');
+			$pluginId = $record ? (int) $record->extension_id : 0;
+		}
+		catch (\Throwable $e)
+		{
+			$pluginId = 0;
+		}
+
+		$settingsUrl = 'index.php?option=com_plugins&task=plugin.edit';
+
+		if ($pluginId > 0)
+		{
+			$settingsUrl .= '&extension_id=' . $pluginId . '&add_ip=' . urlencode($clientIp);
+		}
+
+		$app->enqueueMessage(
+			\Joomla\CMS\Language\Text::sprintf('PLG_SYSTEM_ADMINPATH_IP_PROMPT_MESSAGE', $clientIp, $settingsUrl),
+			'notice'
+		);
+	}
 
 	/**
 	 * Called on installation

@@ -311,6 +311,21 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 					['defer' => true],
 					['core']
 				);
+
+				// Автоподстановка IP из ссылки напоминания
+				$addIp = trim((string) $app->getInput()->getString('add_ip', ''));
+
+				if ($addIp !== '')
+				{
+					$current = (string) $form->getValue('allowed_ips', 'params');
+					$ips     = array_values(array_filter(array_map('trim', preg_split('/[\r\n,;]+/', $current))));
+
+					if (!in_array($addIp, $ips, true))
+					{
+						$ips[] = $addIp;
+						$form->setValue('allowed_ips', 'params', implode("\n", $ips));
+					}
+				}
 			}
 		}
 	}
