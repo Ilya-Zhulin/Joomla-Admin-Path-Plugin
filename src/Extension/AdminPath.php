@@ -197,15 +197,8 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 
 				try
 				{
-					$db    = Factory::getContainer()->get('DatabaseDriver');
-					$query = $db->getQuery(true)
-						->select($db->quoteName('extension_id'))
-						->from($db->quoteName('#__extensions'))
-						->where($db->quoteName('type') . ' = ' . $db->quote('plugin'))
-						->where($db->quoteName('folder') . ' = ' . $db->quote('system'))
-						->where($db->quoteName('element') . ' = ' . $db->quote('adminpath'));
-					$db->setQuery($query);
-					$pluginId = (int) $db->loadResult();
+					$record = \Joomla\CMS\Extension\ExtensionHelper::getExtensionRecord('adminpath', 'plugin', null, 'system');
+					$pluginId = $record ? (int) $record->extension_id : 0;
 				}
 				catch (\Throwable $e)
 				{
@@ -277,15 +270,8 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 
 			try
 			{
-				$db    = Factory::getContainer()->get('DatabaseDriver');
-				$query = $db->getQuery(true)
-					->select($db->quoteName('extension_id'))
-					->from($db->quoteName('#__extensions'))
-					->where($db->quoteName('type') . ' = ' . $db->quote('plugin'))
-					->where($db->quoteName('folder') . ' = ' . $db->quote('system'))
-					->where($db->quoteName('element') . ' = ' . $db->quote('adminpath'));
-				$db->setQuery($query);
-				$pluginId = (int) $db->loadResult();
+				$record = \Joomla\CMS\Extension\ExtensionHelper::getExtensionRecord('adminpath', 'plugin', null, 'system');
+				$pluginId = $record ? (int) $record->extension_id : 0;
 			}
 			catch (\Throwable $e)
 			{
