@@ -332,13 +332,32 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 
 				if ($addIp !== '')
 				{
-					$current = (string) $form->getValue('allowed_ips', 'params');
+					// Данные формы: params может быть строкой JSON либо массивом
+					$params = [];
+
+					if (isset($data->params))
+					{
+						$params = is_array($data->params)
+							? $data->params
+							: (json_decode((string) $data->params, true) ?: []);
+					}
+
+					$current = (string) ($params['allowed_ips'] ?? $form->getValue('allowed_ips', 'params'));
 					$ips     = array_values(array_filter(array_map('trim', preg_split('/[\r\n,;]+/', $current))));
 
 					if (!in_array($addIp, $ips, true))
 					{
-						$ips[] = $addIp;
-						$form->setValue('allowed_ips', 'params', implode("\n", $ips));
+						$ips[]  = $addIp;
+						$merged = implode("\n", $ips);
+
+						// Меняем данные до bind, иначе значение перезапишется из БД
+						if (isset($data->params))
+						{
+							$params['allowed_ips'] = $merged;
+							$data->params          = json_encode($params);
+						}
+
+						$form->setValue('allowed_ips', 'params', $merged);
 					}
 
 					$app->getSession()->set('adminpath_add_ip', '');
