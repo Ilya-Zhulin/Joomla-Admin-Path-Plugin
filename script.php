@@ -63,7 +63,7 @@ class PlgSystemAdminPathInstallerScript
 	 */
 	public function postflight($route, InstallerAdapter $adapter)
 	{
-		if ($route !== 'install')
+		if ($route !== 'install' && $route !== 'update')
 		{
 			return;
 		}
@@ -79,15 +79,29 @@ class PlgSystemAdminPathInstallerScript
 		$app->getLanguage()->load('plg_system_adminpath', JPATH_ADMINISTRATOR);
 
 		$pluginId = 0;
+		$params   = [];
 
 		try
 		{
 			$record   = \Joomla\CMS\Extension\ExtensionHelper::getExtensionRecord('adminpath', 'plugin', null, 'system');
 			$pluginId = $record ? (int) $record->extension_id : 0;
+			$params   = $record && !empty($record->params) ? (json_decode($record->params, true) ?: []) : [];
 		}
 		catch (\Throwable $e)
 		{
 			$pluginId = 0;
+			$params   = [];
+		}
+
+		// Если IP уже в белом списке - не предлагаем
+		$allowedIps = (string) ($params['allowed_ips'] ?? '');
+		$ipList     = $allowedIps !== ''
+			? array_values(array_filter(array_map('trim', preg_split('/[\r\n,;]+/', $allowedIps))))
+			: [];
+
+		if (in_array($clientIp, $ipList, true))
+		{
+			return;
 		}
 
 		$settingsUrl = 'index.php?option=com_plugins&task=plugin.edit';

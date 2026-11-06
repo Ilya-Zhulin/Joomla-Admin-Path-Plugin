@@ -152,6 +152,15 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 		$uri         = Uri::getInstance();
 		$currentPath = $uri->getPath();
 
+		// Запоминаем IP из ссылки напоминания: Joomla может перенаправить
+		// на страницу настроек без этого параметра в URL.
+		$addIp = trim((string) $input->getString('add_ip', ''));
+
+		if ($addIp !== '')
+		{
+			$session->set('adminpath_add_ip', $addIp);
+		}
+
 		// IP клиента. REMOTE_ADDR надёжнее заголовков (их можно подделать).
 		// При работе за прокси/Cloudflare замените на доверенный заголовок.
 		$clientIp = (string) $input->server->get('REMOTE_ADDR', '');
@@ -312,8 +321,14 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 					['core']
 				);
 
-				// Автоподстановка IP из ссылки напоминания
-				$addIp = trim((string) $app->getInput()->getString('add_ip', ''));
+				// Автоподстановка IP из ссылки напоминания.
+				// Joomla может перенаправить без add_ip в URL, поэтому берём из сессии.
+				$addIp = trim((string) $app->getSession()->get('adminpath_add_ip', ''));
+
+				if ($addIp === '')
+				{
+					$addIp = trim((string) $app->getInput()->getString('add_ip', ''));
+				}
 
 				if ($addIp !== '')
 				{
@@ -325,6 +340,8 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 						$ips[] = $addIp;
 						$form->setValue('allowed_ips', 'params', implode("\n", $ips));
 					}
+
+					$app->getSession()->set('adminpath_add_ip', '');
 				}
 			}
 		}
