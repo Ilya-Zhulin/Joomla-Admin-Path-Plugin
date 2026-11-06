@@ -144,11 +144,33 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 		$blockDirect  = (bool) $this->params->get('block_direct', 0);
 		$redirectType = $this->params->get('redirect_type', '404');
 		$customUrl    = $this->params->get('custom_redirect_url', '');
+		$allowedIps   = (string) $this->params->get('allowed_ips', '');
+		$ipPrompt     = (bool) $this->params->get('ip_prompt', 0);
 
 		$input       = $app->getInput();
 		$session     = $app->getSession();
 		$uri         = Uri::getInstance();
 		$currentPath = $uri->getPath();
+
+		// Запоминаем IP из ссылки напоминания: Joomla может перенаправить
+		// на страницу настроек без этого параметра в URL.
+		$addIp = trim((string) $input->getString('add_ip', ''));
+
+		if ($addIp !== '')
+		{
+			$session->set('adminpath_add_ip', $addIp);
+		}
+
+		// IP клиента. REMOTE_ADDR надёжнее заголовков (их можно подделать).
+		// При работе за прокси/Cloudflare замените на доверенный заголовок.
+		$clientIp = (string) $input->server->get('REMOTE_ADDR', '');
+
+		// Разбор белого списка IP
+		$ipList = [];
+		if ($allowedIps !== '')
+		{
+			$ipList = array_values(array_filter(array_map('trim', preg_split('/[\r\n,;]+/', $allowedIps))));
+		}
 
 		// Получаем все параметры запроса
 		$allParams = $input->getArray();
@@ -156,13 +178,37 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 		// Проверяем наличие секретного параметра
 		$hasSecretParam = isset($allParams[$secretParam]);
 
+		// Был ли доступ в сессии до этого запроса (нужно для определения "входа")
+		$hadSessionAccess = (bool) $session->get('adminpath_allowed', 0);
+
 		// Получаем флаг из сессии
 		$allowed = $session->get('adminpath_allowed', 0);
+
+		// IP из белого списка - доступ как обычно, без секрета
+		$ipAllowed = $clientIp !== '' && in_array($clientIp, $ipList, true);
+
+		if ($ipAllowed)
+		{
+			$session->set('adminpath_allowed', 1);
+			$allowed = 1;
+		}
+
+		// Кука, установленная при предыдущем входе (до этого запроса)
+		$hadPromptCookie = isset($_COOKIE['adminpath_prompted']);
 
 		// Если есть секретный параметр - разрешаем доступ
 		if ($hasSecretParam)
 		{
+			// Повторный вход (кука уже была) - отложим напоминание до авторизации
+			if ($ipPrompt && !$ipAllowed && $hadPromptCookie)
+			{
+				setcookie('adminpath_show_prompt', '1', 0, '/');
+			}
+
 			$session->set('adminpath_allowed', 1);
+
+			// Отмечаем в куки, что пользователь уже входил (session cookie)
+			setcookie('adminpath_prompted', '1', 0, '/');
 
 			// Удаляем секретный параметр из URL (чистый редирект)
 			$cleanUri = clone $uri;
@@ -195,6 +241,48 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 
 				$app->redirect($redirectUrl);
 			}
+		}
+
+		// Прямой вход (без секрета) повторного пользователя - отложим напоминание
+		$isDirectLogin = (!$hadSessionAccess) && $hadPromptCookie && !$hasSecretParam;
+
+		if ($ipPrompt && !$ipAllowed && $isDirectLogin)
+		{
+			setcookie('adminpath_show_prompt', '1', 0, '/');
+		}
+
+		// Показываем отложенное напоминание только авторизованным пользователям
+		// (не на странице логина, где пользователь - гость)
+		$user = Factory::getUser();
+		$isLogged = ($user && $user->id > 0);
+
+		if ($ipPrompt && !$ipAllowed && $isLogged && isset($_COOKIE['adminpath_show_prompt']))
+		{
+			$pluginId = 0;
+
+			try
+			{
+				$record = \Joomla\CMS\Extension\ExtensionHelper::getExtensionRecord('adminpath', 'plugin', null, 'system');
+				$pluginId = $record ? (int) $record->extension_id : 0;
+			}
+			catch (\Throwable $e)
+			{
+				$pluginId = 0;
+			}
+
+			$settingsUrl = 'index.php?option=com_plugins&task=plugin.edit';
+
+			if ($pluginId > 0)
+			{
+				$settingsUrl .= '&extension_id=' . $pluginId . '&add_ip=' . urlencode($clientIp);
+			}
+
+			$message = Text::sprintf('PLG_SYSTEM_ADMINPATH_IP_PROMPT_MESSAGE', $clientIp, $settingsUrl);
+
+			$app->enqueueMessage($message, 'notice');
+
+			// Удаляем куку, чтобы не показывать повторно
+			setcookie('adminpath_show_prompt', '', time() - 3600, '/');
 		}
 	}
 
@@ -232,6 +320,48 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 					['defer' => true],
 					['core']
 				);
+
+				// Автоподстановка IP из ссылки напоминания.
+				// Joomla может перенаправить без add_ip в URL, поэтому берём из сессии.
+				$addIp = trim((string) $app->getSession()->get('adminpath_add_ip', ''));
+
+				if ($addIp === '')
+				{
+					$addIp = trim((string) $app->getInput()->getString('add_ip', ''));
+				}
+
+				if ($addIp !== '')
+				{
+					// Данные формы: params может быть строкой JSON либо массивом
+					$params = [];
+
+					if (isset($data->params))
+					{
+						$params = is_array($data->params)
+							? $data->params
+							: (json_decode((string) $data->params, true) ?: []);
+					}
+
+					$current = (string) ($params['allowed_ips'] ?? $form->getValue('allowed_ips', 'params'));
+					$ips     = array_values(array_filter(array_map('trim', preg_split('/[\r\n,;]+/', $current))));
+
+					if (!in_array($addIp, $ips, true))
+					{
+						$ips[]  = $addIp;
+						$merged = implode("\n", $ips);
+
+						// Меняем данные до bind, иначе значение перезапишется из БД
+						if (isset($data->params))
+						{
+							$params['allowed_ips'] = $merged;
+							$data->params          = json_encode($params);
+						}
+
+						$form->setValue('allowed_ips', 'params', $merged);
+					}
+
+					$app->getSession()->set('adminpath_add_ip', '');
+				}
 			}
 		}
 	}

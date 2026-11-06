@@ -6,7 +6,7 @@
   ~ @copyright  ©Ilya A.Zhulin, 2026
   ~ @license    GNU General Public License version 2 or later;
   ~
-  ~ The last change: 12.02.2026, 16:35
+  ~ The last change: 06.11.2026, 11:54
   -->
 <extension type="plugin" group="system" method="upgrade">
     <name>plg_system_adminpath</name>
@@ -16,7 +16,7 @@
     <license>GNU General Public License version 2 or later</license>
     <authorEmail>ilya.zhulin@hotmail.com</authorEmail>
     <authorUrl>https://zhulinia.ru</authorUrl>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <description>PLG_SYSTEM_ADMINPATH_XML_DESCRIPTION</description>
 
     <namespace path="src">Joomla\Plugin\System\AdminPath</namespace>
@@ -65,6 +65,15 @@
                        label="PLG_SYSTEM_ADMINPATH_CUSTOM_REDIRECT_URL_LABEL"
                        description="PLG_SYSTEM_ADMINPATH_CUSTOM_REDIRECT_URL_DESC" showon="redirect_type:custom"
                        filter="url"/>
+                <field name="allowed_ips" type="textarea" default="" rows="4" cols="40"
+                       label="PLG_SYSTEM_ADMINPATH_ALLOWED_IPS_LABEL"
+                       description="PLG_SYSTEM_ADMINPATH_ALLOWED_IPS_DESC"
+                       filter="raw"/>
+                <field name="ip_prompt" type="radio" default="0" label="PLG_SYSTEM_ADMINPATH_IP_PROMPT_LABEL"
+                       description="PLG_SYSTEM_ADMINPATH_IP_PROMPT_DESC">
+                    <option value="0">JNO</option>
+                    <option value="1">JYES</option>
+                </field>
             </fieldset>
         </fields>
     </config>

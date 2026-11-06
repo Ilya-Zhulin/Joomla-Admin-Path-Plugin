@@ -192,9 +192,36 @@
         });
     };
 
+    // Подстановка IP из параметра add_ip в белый список
+    function prefillAllowedIp() {
+        const params = new URLSearchParams(window.location.search);
+        const addIp = params.get('add_ip');
+        if (!addIp) return;
+
+        const field = document.getElementById('jform_params_allowed_ips');
+        if (!field) return;
+
+        const current = field.value.trim();
+        const ips = current ? current.split(/[\\r\\n,;]+/).map(s => s.trim()).filter(Boolean) : [];
+
+        if (!ips.includes(addIp)) {
+            ips.push(addIp);
+            field.value = ips.join('\\n');
+        }
+
+        // Уведомление
+        if (typeof Joomla !== 'undefined' && Joomla.renderMessages) {
+            Joomla.renderMessages({ notice: ['IP ' + addIp + ' ' + (Joomla.Text ? Joomla.Text._('PLG_SYSTEM_ADMINPATH_IP_ADDED', 'добавлен в белый список. Сохраните настройки.') : 'добавлен в белый список. Сохраните настройки.')] });
+        }
+    }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initAdminPath);
+        document.addEventListener('DOMContentLoaded', function () {
+            initAdminPath();
+            prefillAllowedIp();
+        });
     } else {
         initAdminPath();
+        prefillAllowedIp();
     }
 })();
