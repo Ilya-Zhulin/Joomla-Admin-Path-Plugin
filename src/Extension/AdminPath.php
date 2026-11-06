@@ -169,6 +169,9 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 		// Проверяем наличие секретного параметра
 		$hasSecretParam = isset($allParams[$secretParam]);
 
+		// Был ли доступ в сессии до этого запроса (нужно для определения "входа")
+		$hadSessionAccess = (bool) $session->get('adminpath_allowed', 0);
+
 		// Получаем флаг из сессии
 		$allowed = $session->get('adminpath_allowed', 0);
 
@@ -181,9 +184,46 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 			$allowed = 1;
 		}
 
+		// Кука, установленная при предыдущем входе (до этого запроса)
+		$hadPromptCookie = isset($_COOKIE['adminpath_prompted']);
+
 		// Если есть секретный параметр - разрешаем доступ
 		if ($hasSecretParam)
 		{
+			// Повторный вход (кука уже была) - напоминание о IP
+			if ($ipPrompt && !$ipAllowed && $hadPromptCookie)
+			{
+				$pluginId = 0;
+
+				try
+				{
+					$db    = Factory::getContainer()->get('DatabaseDriver');
+					$query = $db->getQuery(true)
+						->select($db->quoteName('extension_id'))
+						->from($db->quoteName('#__extensions'))
+						->where($db->quoteName('type') . ' = ' . $db->quote('plugin'))
+						->where($db->quoteName('folder') . ' = ' . $db->quote('system'))
+						->where($db->quoteName('element') . ' = ' . $db->quote('adminpath'));
+					$db->setQuery($query);
+					$pluginId = (int) $db->loadResult();
+				}
+				catch (\Throwable $e)
+				{
+					$pluginId = 0;
+				}
+
+				$settingsUrl = 'index.php?option=com_plugins&task=plugin.edit';
+
+				if ($pluginId > 0)
+				{
+					$settingsUrl .= '&extension_id=' . $pluginId . '&add_ip=' . urlencode($clientIp);
+				}
+
+				$message = Text::sprintf('PLG_SYSTEM_ADMINPATH_IP_PROMPT_MESSAGE', $clientIp, $settingsUrl);
+
+				$app->enqueueMessage($message, 'notice');
+			}
+
 			$session->set('adminpath_allowed', 1);
 
 			// Отмечаем в куки, что пользователь уже входил (session cookie)
@@ -223,9 +263,15 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 		}
 
 		// Напоминание о добавлении IP в белый список:
-		// показываем, если пользователь уже входил в этой сессии браузера,
-		// IP ещё не в белом списке и функция включена.
-		if ($ipPrompt && !$ipAllowed && isset($_COOKIE['adminpath_prompted']))
+		// показываем только при входе (не при обычной навигации по админке),
+		// не на странице логина, если IP ещё не в белом списке, функция включена
+		// и пользователь уже входил в этой сессии браузера.
+		$isLogin = ($input->get('option') === 'com_login');
+		$option = (string) $input->get('option', '');
+		$onDashboard = ($option === '' || $option === 'com_cpanel' || $option === 'com_admin' || $option === 'com_dashboard');
+		$isDirectLogin = (!$hadSessionAccess) && $hadPromptCookie && !$hasSecretParam;
+
+		if ($ipPrompt && !$ipAllowed && !$isLogin && $onDashboard && $hadPromptCookie && $isDirectLogin)
 		{
 			$pluginId = 0;
 
@@ -246,7 +292,7 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 				$pluginId = 0;
 			}
 
-			$settingsUrl = 'index.php?option=com_plugins&view=plugin&layout=edit';
+			$settingsUrl = 'index.php?option=com_plugins&task=plugin.edit';
 
 			if ($pluginId > 0)
 			{
