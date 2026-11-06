@@ -190,31 +190,10 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 		// Если есть секретный параметр - разрешаем доступ
 		if ($hasSecretParam)
 		{
-			// Повторный вход (кука уже была) - напоминание о IP
+			// Повторный вход (кука уже была) - отложим напоминание до авторизации
 			if ($ipPrompt && !$ipAllowed && $hadPromptCookie)
 			{
-				$pluginId = 0;
-
-				try
-				{
-					$record = \Joomla\CMS\Extension\ExtensionHelper::getExtensionRecord('adminpath', 'plugin', null, 'system');
-					$pluginId = $record ? (int) $record->extension_id : 0;
-				}
-				catch (\Throwable $e)
-				{
-					$pluginId = 0;
-				}
-
-				$settingsUrl = 'index.php?option=com_plugins&task=plugin.edit';
-
-				if ($pluginId > 0)
-				{
-					$settingsUrl .= '&extension_id=' . $pluginId . '&add_ip=' . urlencode($clientIp);
-				}
-
-				$message = Text::sprintf('PLG_SYSTEM_ADMINPATH_IP_PROMPT_MESSAGE', $clientIp, $settingsUrl);
-
-				$app->enqueueMessage($message, 'notice');
+				setcookie('adminpath_show_prompt', '1', 0, '/');
 			}
 
 			$session->set('adminpath_allowed', 1);
@@ -255,16 +234,20 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 			}
 		}
 
-		// Напоминание о добавлении IP в белый список:
-		// показываем только при входе (не при обычной навигации по админке),
-		// не на странице логина, если IP ещё не в белом списке, функция включена
-		// и пользователь уже входил в этой сессии браузера.
-		$isLogin = ($input->get('option') === 'com_login');
-		$option = (string) $input->get('option', '');
-		$onDashboard = ($option === '' || $option === 'com_cpanel' || $option === 'com_admin' || $option === 'com_dashboard');
+		// Прямой вход (без секрета) повторного пользователя - отложим напоминание
 		$isDirectLogin = (!$hadSessionAccess) && $hadPromptCookie && !$hasSecretParam;
 
-		if ($ipPrompt && !$ipAllowed && !$isLogin && $onDashboard && $hadPromptCookie && $isDirectLogin)
+		if ($ipPrompt && !$ipAllowed && $isDirectLogin)
+		{
+			setcookie('adminpath_show_prompt', '1', 0, '/');
+		}
+
+		// Показываем отложенное напоминание только авторизованным пользователям
+		// (не на странице логина, где пользователь - гость)
+		$user = Factory::getUser();
+		$isLogged = ($user && $user->id > 0);
+
+		if ($ipPrompt && !$ipAllowed && $isLogged && isset($_COOKIE['adminpath_show_prompt']))
 		{
 			$pluginId = 0;
 
@@ -288,6 +271,9 @@ class AdminPath extends CMSPlugin implements SubscriberInterface
 			$message = Text::sprintf('PLG_SYSTEM_ADMINPATH_IP_PROMPT_MESSAGE', $clientIp, $settingsUrl);
 
 			$app->enqueueMessage($message, 'notice');
+
+			// Удаляем куку, чтобы не показывать повторно
+			setcookie('adminpath_show_prompt', '', time() - 3600, '/');
 		}
 	}
 
